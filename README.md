@@ -1,1 +1,1 @@
-# USC_MAPF
+# MAPF
