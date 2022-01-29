@@ -112,6 +112,9 @@ def is_constrained(curr_loc, next_loc, next_time, constraint_table):
     # Returns True if the movement is invalid
     # Else return False
 
+    
+
+
     terminated_agents = [constraint.position for constraint in constraint_table['terminated'] if next_time >= constraint.time]
     vertex_collision_with_terminated_agent = next_loc in terminated_agents
     if vertex_collision_with_terminated_agent:
@@ -124,6 +127,10 @@ def is_constrained(curr_loc, next_loc, next_time, constraint_table):
         if  vertex_collision or \
             edge_collision:
             return True
+        
+    # To catch loops
+    if next_time > constraint_table['max_timestep'] + 1e2:
+        return True
 
     return False
 
@@ -180,7 +187,6 @@ def a_star(my_map, start_loc, goal_loc, h_values, agent, constraints):
                 if is_constrained(curr['loc'], curr['loc'], timestep, constraint_table):
                     valid_path = False
             
-            # If a valid path was found, return
             if valid_path:
                 return get_path(curr)
 
