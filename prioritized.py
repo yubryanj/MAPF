@@ -1,5 +1,5 @@
 import time as timer
-from single_agent_planner import Constraint, compute_heuristics, a_star, get_sum_of_cost
+from single_agent_planner import compute_heuristics, a_star, get_sum_of_cost
 
 
 class PrioritizedPlanningSolver(object):
@@ -45,10 +45,38 @@ class PrioritizedPlanningSolver(object):
             #            * constraints: array of constraints to consider for future A* searches
             lower_priority_agents = [j for j in range(i+1,self.num_of_agents)]
             for agent in lower_priority_agents:
-                constraint = [Constraint(time=time, position=position, agent=agent, terminated=False) for time, position in enumerate(path[:-1])]
-                constraint += [Constraint(time=len(path)-1, position=path[-1], agent=agent, terminated=True)]
-                constraints.extend(constraint)
+                for time, position in enumerate(path):
 
+                    # Lower priority agents cannot be on this vertex at time t
+                    vertex_constraint = {
+                        "time": time,
+                        "position": position,
+                        "agent": agent,
+                        "type": 'vertex_constraint'
+                    }
+
+                    # Lower priority agents cannot do the inverse transition 
+                    # from position path[t] to path[t-1] at time t
+                    edge_constraint = {
+                        "time": time,
+                        "edge": (path[time], path[time-1]), # Lower priority agents cannot do the reverse of this transition
+                        "agent": agent,
+                        "type": "edge_constraint"
+                    }
+
+                    constraints.append(vertex_constraint)
+                    constraints.append(edge_constraint)
+
+                # Other agents cannot path through a vertex
+                # where an agent has terminated their path
+                termination_constraint = {
+                    "time": time,
+                    "position": path[-1],
+                    "agent": agent,
+                    "type": "termination_constraint"
+                }
+                constraints.append(termination_constraint)
+                
             ##############################
 
         self.CPU_time = timer.time() - start_time

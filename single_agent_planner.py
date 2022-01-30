@@ -1,7 +1,6 @@
 import heapq
 
 from collections import namedtuple
-Constraint = namedtuple('Constraint', 'time position agent terminated')
 
 
 def move(loc, dir):
@@ -69,16 +68,26 @@ def build_constraint_table(constraints, agent):
 
     # Allocate storage and retrieve list of unique timesteps
     constraint_table = {}
-    timesteps = list(set([constraint.time for constraint in constraints if constraint.agent == agent]))
+    constraint_table['vertex_collisions'] = {}
+    constraint_table['edge_collisions'] = {}
+    constraint_table['termination_collisions'] = {}
+
 
     # For each timestep, retrieve occupied positions
-    for timestep in timesteps:
-        constraint_table[timestep] = [  constraint.position \
-                                        for constraint in constraints \
-                                        if  constraint.agent == agent \
-                                            and constraint.time == timestep]
+    timesteps = list(set([constraint.get('time') for constraint in constraints if constraint.get('agent') == agent]))
+    agent_constraints = [constraint for constraint in constraints if constraint.get('agent') == agent]
 
-    constraint_table['terminated'] = [constraint for constraint in constraints if constraint.terminated==True]
+    vertex_constraints = [constraint for constraint in agent_constraints if constraint.get('type') == 'vertex_constraint']
+    edge_constraints = [constraint for constraint in agent_constraints if constraint.get('type') == 'edge_constraint']
+    termination_constraints = [constraint for constraint in agent_constraints if constraint.get('type') == 'termination_constraint']
+
+    # Populate the constraint table
+    for timestep in timesteps:
+        constraint_table['vertex_collisions'][timestep] = [constraint.get('position') for constraint in vertex_constraints if constraint.get('time') == timestep]
+        constraint_table['edge_collisions'][timestep] = [constraint.get('edge') for constraint in edge_constraints if constraint.get('time') == timestep]
+        constraint_table['termination_collisions'][timestep] = [constraint.get('position') for constraint in termination_constraints if constraint.get('time') == timestep]
+
+    # Record max timestep in constraints
     constraint_table['max_timestep'] = max(timesteps) if timesteps else 0
 
     return constraint_table
@@ -105,24 +114,27 @@ def get_path(goal_node):
 
 def is_constrained(curr_loc, next_loc, next_time, constraint_table):
     ##############################
-    # (DONE 28.01.22) Task 1.2/1.3: Check if a move from curr_loc to next_loc at time step next_time violates
+    # (DONE 28.01.22) Task 1.2/1.3: Check if a move from curr_loc to next_loc at time step 'time' violates
     #               any given constraint. For efficiency the constraints are indexed in a constraint_table
     #               by time step, see build_constraint_table.
 
     # Returns True if the movement is invalid
     # Else return False
 
-    
+    # No existing constraints - return immediately
+    if constraint_table.get('max_timestep') == 0:
+        return False
 
-
-    terminated_agents = [constraint.position for constraint in constraint_table['terminated'] if next_time >= constraint.time]
-    vertex_collision_with_terminated_agent = next_loc in terminated_agents
-    if vertex_collision_with_terminated_agent:
+    # Check for termination across all timesteps
+    timesteps = min(next_time, constraint_table.get('max_timestep') + 1)
+    termination_collision = next_loc in [position for time in range(timesteps) for position in constraint_table.get('termination_collisions').get(time)]
+    if termination_collision:
         return True
 
-    if  next_time in constraint_table.keys():
-        vertex_collision = next_loc in constraint_table[next_time]
-        edge_collision = curr_loc in constraint_table[next_time] and next_loc in constraint_table[next_time - 1]        
+    # Check for vertex, and edge collision
+    if next_time <= constraint_table.get('max_timestep'):
+        vertex_collision = next_loc in constraint_table.get('vertex_collisions').get(next_time)
+        edge_collision = (curr_loc, next_loc) in constraint_table.get('edge_collisions').get(next_time)
 
         if  vertex_collision or \
             edge_collision:
@@ -179,16 +191,20 @@ def a_star(my_map, start_loc, goal_loc, h_values, agent, constraints):
 
         # If we found the goal
         if curr['loc'] == goal_loc:
-        
-            # If the agent is going to terminate in a higher priority agent's path
-            # Then an invalid solution was found
+            path = get_path(curr)
+
+            # Recheck if this node will collide during its path
+            # or if it will terminate in the path of a
+            # higher priority agent's path
             valid_path = True
-            for timestep in range(curr['timestep'] + 1, constraint_table['max_timestep']):
-                if is_constrained(curr['loc'], curr['loc'], timestep, constraint_table):
+            for timestep in range(len(path)):
+                current_location = get_location(path, timestep)
+                next_location = get_location(path, timestep + 1)
+                if is_constrained(current_location, next_location, timestep + 1, constraint_table):
                     valid_path = False
             
             if valid_path:
-                return get_path(curr)
+                return path
 
         for dir in range(4):
             # Take a transition
