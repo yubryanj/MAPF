@@ -1,7 +1,5 @@
 import heapq
 
-from collections import namedtuple
-
 
 def move(loc, dir):
     directions = [(0, -1), (1, 0), (0, 1), (-1, 0)]
@@ -71,6 +69,8 @@ def build_constraint_table(constraints, agent):
     constraint_table['vertex_collisions'] = {}
     constraint_table['edge_collisions'] = {}
     constraint_table['termination_collisions'] = {}
+    constraint_table['disjoint_vertex_collisions'] = {}
+    constraint_table['disjoint_edge_collisions'] = {}
 
 
     # For each timestep, retrieve occupied positions
@@ -88,7 +88,47 @@ def build_constraint_table(constraints, agent):
         constraint_table['termination_collisions'][timestep] = [constraint.get('position') for constraint in termination_constraints if constraint.get('time') == timestep]
 
     # Record max timestep in constraints
+    constraint_table['timesteps'] = timesteps
     constraint_table['max_timestep'] = max(timesteps) if timesteps else 0
+
+    # Record disjoint vertices constraints
+    disjoint_vertex_constraints = [constraint for constraint in constraints if constraint.get('type') == 'disjoint_vertex_constraint']
+    for disjoint_vertex_constraint in disjoint_vertex_constraints:
+        timestep = disjoint_vertex_constraint.get('time')
+        position = disjoint_vertex_constraint.get('position')
+
+        # All other agents cannot be on this cell at this time
+        if agent != disjoint_vertex_constraint.get('agent'):
+            if timestep in constraint_table['vertex_collisions'].keys():
+                constraint_table['vertex_collisions'][timestep].append(position)
+            else:
+                constraint_table['vertex_collisions'][timestep] = [position]
+        else:
+        # Disjoint Vertex requirements state that this agent must be on this cell at this time
+            if timestep in constraint_table['disjoint_vertex_collisions'].keys():
+                constraint_table['disjoint_vertex_collisions'][timestep].append(position)
+            else:
+                constraint_table['disjoint_vertex_collisions'][timestep] = [position]
+
+
+    # Record disjoint edge constraints
+    disjoint_edge_constraints = [constraint for constraint in constraints if constraint.get('type') == 'disjoint_edge_constraint']
+    for disjoint_edge_constraint in disjoint_edge_constraints:
+        timestep = disjoint_edge_constraint.get('time')
+        edge = disjoint_edge_constraint.get('edge')
+
+        # All other agents cannot be on this cell at this time
+        if agent != disjoint_edge_constraint.get('agent'):
+            if timestep in constraint_table['edge_collisions'].keys():
+                constraint_table['edge_collisions'][timestep].append(edge)
+            else:
+                constraint_table['edge_collisions'][timestep] = [edge]
+        else:
+        # Disjoint Vertex requirements state that this agent must be on this cell at this time
+            if timestep in constraint_table['disjoint_edge_collisions'].keys():
+                constraint_table['disjoint_edge_collisions'][timestep].append(edge)
+            else:
+                constraint_table['disjoint_edge_collisions'][timestep] = [edge]
 
     return constraint_table
 
@@ -127,17 +167,36 @@ def is_constrained(curr_loc, next_loc, next_time, constraint_table):
 
     # Check for termination across all timesteps
     timesteps = min(next_time, constraint_table.get('max_timestep') + 1)
-    termination_collision = next_loc in [position for time in range(timesteps) for position in constraint_table.get('termination_collisions').get(time)]
+    terminated_positions = []
+    for timestep in range(timesteps):
+        if timestep in constraint_table.get('timesteps'):
+            terminated_positions.extend(constraint_table.get('termination_collisions').get(timestep))
+    termination_collision = next_loc in terminated_positions
     if termination_collision:
         return True
 
-    # Check for vertex, and edge collision
-    if next_time <= constraint_table.get('max_timestep'):
+    # Check for vertex collisions
+    if next_time in constraint_table.get('vertex_collisions').keys():
         vertex_collision = next_loc in constraint_table.get('vertex_collisions').get(next_time)
-        edge_collision = (curr_loc, next_loc) in constraint_table.get('edge_collisions').get(next_time)
+        if  vertex_collision:
+            return True
 
-        if  vertex_collision or \
-            edge_collision:
+    # Check that the disjoint vertex condition is satisfied
+    if next_time in constraint_table.get('disjoint_vertex_collisions').keys():
+        disjoint_vertex_constraint_unsatisfied = next_loc not in constraint_table.get('disjoint_vertex_collisions').get(next_time)
+        if  disjoint_vertex_constraint_unsatisfied:
+            return True
+
+    # Check for edge collisions
+    if (next_time - 1) in constraint_table.get('edge_collisions').keys():
+        edge_collision = (curr_loc, next_loc) in constraint_table.get('edge_collisions').get(next_time - 1)
+        if edge_collision:
+            return True
+
+    # Check that the disjoint edge condition is satisfied
+    if (next_time - 1) in constraint_table.get('disjoint_edge_collisions').keys():
+        edge_collision_disjoint = (curr_loc, next_loc) not in constraint_table.get('disjoint_edge_collisions').get(next_time - 1)
+        if edge_collision_disjoint:
             return True
         
     # To catch loops

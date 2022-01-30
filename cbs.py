@@ -14,35 +14,35 @@ def detect_collision(path1, path2):
 
     longest_path_length = max(len(path1), len(path2))
 
-
     for timestep in range(longest_path_length):
-        current_position_1 = get_location(path1, timestep)
-        current_position_2 = get_location(path2, timestep)
+        current_position_0 = get_location(path1, timestep)
+        current_position_1 = get_location(path2, timestep)
 
-        previous_position_1 = get_location(path1, timestep-1)
-        previous_position_2 = get_location(path2, timestep-2)
+        next_position_0 = get_location(path1, timestep + 1)
+        next_position_1 = get_location(path2, timestep + 1)
 
-        vertex_collision = current_position_1 == current_position_2
-        edge_collision = current_position_1 == previous_position_2 and current_position_2 == previous_position_1
+        vertex_collision = next_position_0 == next_position_1
+        edge_collision = current_position_1 == next_position_0 and current_position_0 == next_position_1
 
-        result = {
-            "agent_0": {
-                "previous_position": previous_position_1,
-                "current_position": current_position_1
-            },
-            "agent_1": {
-                "previous_position": previous_position_2,
-                "current_position": current_position_2
-            },
-            "timestep": timestep
-        }
-
-        if  vertex_collision:
-            result['collision_type'] = 'vertex_collision'
-            return result
+        if vertex_collision:
+            # Both agent 0 and agent 1 will both be in next_position_1 at time t+1
+            return {
+                "time": timestep + 1,
+                "position": next_position_1,
+                "agents": None,
+                "type": 'vertex_collision'
+            }
         elif edge_collision:
-            result['collision_type'] = 'edge_collision'
-            return result
+            # Agent 0, in current_position_0 is moving into next_position_0 at time t
+            # Agent 1, in current_position_1 is moving into next_position_1 at time t
+            # However, current_position_0 is next_position_1 and next_position_0 is current_position_1
+            # Thus an illegal swap of position occurs
+            return {
+                "time": timestep,
+                "edge": (current_position_0, next_position_0),
+                "agents": None,
+                "type": 'edge_collision'
+            }
 
     return None
 
@@ -57,19 +57,17 @@ def detect_collisions(paths):
     from itertools import combinations
 
     # Allocate storage & enumerate all agents
-    collisions_table = []
+    first_collisions = []
     agents = [i for i in range(len(paths))]
 
-    
     # iterate through all pairs of agents
     for agent_0, agent_1 in combinations(agents, 2):
         collision = detect_collision(paths[agent_0], paths[agent_1])
-        
-        collision['agent_1_id'] = agent_1
-        collision['agent_0_id'] = agent_0
-        collisions_table.append(collision)
+        if collision:
+            collision['agents'] = (agent_0, agent_1)
+            first_collisions.append(collision)
 
-    return collisions_table
+    return first_collisions
 
 
 def standard_splitting(collision):
@@ -83,28 +81,36 @@ def standard_splitting(collision):
     #                          specified edge at the specified timestep
 
     constraints = []
-    collision_type = collision.get('collision_type')
+    collision_type = collision.get('type')
 
     if collision_type == 'vertex_collision':
         # Create constraints for both agents
-        for id in [0,1]:
+        for agent in collision.get('agents'):
             constraint = {
-                'position': collision.get(f'agent_{id}').get('current_position'),
-                'time': collision.get('timestep'),
-                'agent': collision.get(f'agent_{id}_id'),
-                'type': "vertex_collision"
+                'time': collision.get('time'),
+                'position': collision.get('position'),
+                'agent': agent,
+                'type': "vertex_constraint"
             }
             constraints.append(constraint)
 
     elif collision_type == 'edge_collision':
-        for id in [0,1]:
-            constraint = {
-                'to_position': collision.get(f'agent_{id}').get('current_position'),
-                'time': collision.get('timestep'),
-                'agent': collision.get(f'agent_{id}_id'),
-                'type': "edge_collision"
-            }
-            constraints.append(constraint)
+        agent_0, agent_1 = collision.get('agents')
+        constraint_0 = {
+            'time': collision.get('time'),
+            'edge': collision.get('edge'),
+            'agent': agent_0,
+            'type': "edge_constraint"
+        }
+
+        constraint_1 = {
+            'time': collision.get('time'),
+            'edge': collision.get('edge')[::-1],
+            'agent': agent_1,
+            'type': "edge_constraint"
+        }
+
+        constraints.extend([constraint_0, constraint_1])
     else:
         raise Exception("Invalid collision type in standard splitting")
 
@@ -122,7 +128,52 @@ def disjoint_splitting(collision):
     #                          specified edge at the specified timestep
     #           Choose the agent randomly
 
-    pass
+    constraints = []
+    collision_type = collision.get('type')
+    
+    # Choose agent randomly
+    agents = list(collision.get('agents'))
+    random.shuffle(agents)
+    agent_0, agent_1 = agents
+
+
+    if collision_type == 'vertex_collision':
+        # Create constraints for both agents
+        constraint_0 = {
+            'time': collision.get('time'),
+            'position': collision.get('position'),
+            'agent': agent_0,
+            'type': "disjoint_vertex_constraint"
+        }
+
+        constraint_1 = {
+            'time': collision.get('time'),
+            'position': collision.get('position'),
+            'agent': agent_1,
+            'type': "vertex_constraint"
+        }
+            
+
+    elif collision_type == 'edge_collision':
+        constraint_0 = {
+            'time': collision.get('time'),
+            'edge': collision.get('edge'),
+            'agent': agent_0,
+            'type': "disjoint_edge_constraint"
+        }
+
+        constraint_1 = {
+            'time': collision.get('time'),
+            'edge': collision.get('edge')[::-1],
+            'agent': agent_1,
+            'type': "edge_constraint"
+        }
+    else:
+        raise Exception("Invalid collision type in standard splitting")
+
+    constraints.extend([constraint_0, constraint_1])
+
+    return constraints
 
 
 class CBSSolver(object):
@@ -194,7 +245,10 @@ class CBSSolver(object):
 
         # Task 3.2: Testing
         for collision in root['collisions']:
-            print(standard_splitting(collision))
+            if disjoint:
+                print(disjoint_splitting(collision))
+            else:
+                print(standard_splitting(collision))
 
         ##############################
         # Task 3.3: High-Level Search
@@ -214,42 +268,48 @@ class CBSSolver(object):
                 collision = node.get('collisions')[0]
 
                 # Split the collision for each agent
-                constraints = standard_splitting(collision)
+                if disjoint:
+                    constraints = disjoint_splitting(collision)
+                else:
+                    constraints = standard_splitting(collision)
 
                 # For each constraint, find a path and continue search
                 for constraint in constraints:
                     
+                    # Update constraints
+                    if constraint in node.get('constraints'):
+                        new_constraints = node.get('constraints')
+                    else:
+                        new_constraints = node.get('constraints') + [constraint]
+
+                    # Prepare child node
                     child = {
                         'cost': 0,
-                        'constraints': node.get('constraints') + [constraint],
+                        'constraints': new_constraints,
                         'paths': [],
                         'collisions': []
                     }
 
                     # Find an updated path for each agent
-                    valid_path_found = True
+                    valid_paths_found = True
                     for i in range(self.num_of_agents):  
                         path = a_star(self.my_map, self.starts[i], self.goals[i], self.heuristics[i],
                                     i, child['constraints'])
                         if path is None:
-                            valid_path_found = False
+                            valid_paths_found = False
                             # raise BaseException('No solutions')
                         child['paths'].append(path)
 
-                    if valid_path_found:
+                    if valid_paths_found:
                         child['cost'] = get_sum_of_cost(child['paths'])
                         child['collisions'] = detect_collisions(child['paths'])
-                        
                         self.push_node(child)
-
 
             # if there is no collision, return solution
             else:
-                return node.paths
+                self.print_results(root)
+                return node.get('paths')
 
-
-        self.print_results(root)
-        return root['paths']
 
 
     def print_results(self, node):

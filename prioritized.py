@@ -58,7 +58,7 @@ class PrioritizedPlanningSolver(object):
                     # Lower priority agents cannot do the inverse transition 
                     # from position path[t] to path[t-1] at time t
                     edge_constraint = {
-                        "time": time,
+                        "time": time - 1,
                         "edge": (path[time], path[time-1]), # Lower priority agents cannot do the reverse of this transition
                         "agent": agent,
                         "type": "edge_constraint"
