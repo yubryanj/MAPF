@@ -165,11 +165,13 @@ def is_constrained(curr_loc, next_loc, next_time, constraint_table):
     if constraint_table.get('max_timestep') == 0:
         return False
 
+    # Cannot terminate on a pre-planned path
+
     # Check for termination across all timesteps
-    timesteps = min(next_time, constraint_table.get('max_timestep') + 1)
+    terminated_timesteps = list(constraint_table.get('termination_collisions').keys())
     terminated_positions = []
-    for timestep in range(timesteps):
-        if timestep in constraint_table.get('timesteps'):
+    for timestep in terminated_timesteps:
+        if timestep < next_time:
             terminated_positions.extend(constraint_table.get('termination_collisions').get(timestep))
     termination_collision = next_loc in terminated_positions
     if termination_collision:
@@ -256,7 +258,7 @@ def a_star(my_map, start_loc, goal_loc, h_values, agent, constraints):
             # or if it will terminate in the path of a
             # higher priority agent's path
             valid_path = True
-            for timestep in range(len(path)):
+            for timestep in range(constraint_table.get('max_timestep')):
                 current_location = get_location(path, timestep)
                 next_location = get_location(path, timestep + 1)
                 if is_constrained(current_location, next_location, timestep + 1, constraint_table):
@@ -268,6 +270,14 @@ def a_star(my_map, start_loc, goal_loc, h_values, agent, constraints):
         for dir in range(4):
             # Take a transition
             child_loc = move(curr['loc'], dir)
+
+            # Disallow transitions out of the map;
+            # For test maps not bounded by a wall
+            if  child_loc[0] < 0 or \
+                child_loc[1] < 0 or \
+                child_loc[0] >= len(my_map) or \
+                child_loc[1] >= len(my_map[0]):
+                continue
 
             # Disallow Transition into a wall
             if my_map[child_loc[0]][child_loc[1]]:
